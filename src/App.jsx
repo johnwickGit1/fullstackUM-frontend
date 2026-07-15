@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8080/users';
+const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); 
