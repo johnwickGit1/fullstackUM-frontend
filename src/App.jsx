@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
-const SESSION_DURATION = 15 * 60; // 15 minutes in seconds
+const API_BASE_URL = 'https://your-backend-name.onrender.com/users'; 
+const SESSION_DURATION = 15 * 60; // 15 minutes
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); 
@@ -16,24 +16,51 @@ function App() {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', userType: 'user' });
 
-  // ⏱️ Session Timer Effect
+  // ⏱️ Session Enforcer (Timer + Single-Session Tracker)
   useEffect(() => {
     let timerInterval;
+    let syncInterval;
+
     if (loggedInUser) {
+      // 1. 15-Minute Countdown
       timerInterval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
-            handleLogout();
-            showMessage("Session expired due to inactivity. Please log in again.", true);
+            handleLogout("Your 15-minute session has naturally expired.");
             return SESSION_DURATION;
           }
           return prev - 1;
         });
       }, 1000);
+
+      // 2. Multi-Device / Admin Force-Logout Monitor
+      syncInterval = setInterval(async () => {
+        try {
+          // Fetch the latest directory to check our own status
+          const response = await fetch(API_BASE_URL);
+          const latestUsers = await response.json();
+          setUsers(latestUsers); // Keeps admin tables auto-updated too
+
+          const me = latestUsers.find(u => u.id === loggedInUser.id);
+          
+          if (me) {
+            // If the session ID doesn't match, or it was wiped to null
+            if (me.currentSessionId !== loggedInUser.currentSessionId) {
+              handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.");
+            }
+          }
+        } catch (error) {
+          // Silently ignore network blips during polling
+        }
+      }, 5000); // Check every 5 seconds
     } else {
       setTimeLeft(SESSION_DURATION); 
     }
-    return () => clearInterval(timerInterval);
+
+    return () => {
+      clearInterval(timerInterval);
+      clearInterval(syncInterval);
+    };
   }, [loggedInUser]);
 
   const formatTime = (seconds) => {
@@ -44,7 +71,7 @@ function App() {
 
   const showMessage = (text, isError = false) => {
     setMessage({ text, isError });
-    setTimeout(() => setMessage({ text: '', isError: false }), 5000);
+    setTimeout(() => setMessage({ text: '', isError: false }), 6000);
   };
 
   const handleRegister = async (e) => {
@@ -85,14 +112,26 @@ function App() {
       
       if (response.ok) {
         const userData = await response.json();
-        setLoggedInUser(userData);
-        if (userData.userType === 'admin') loadUsers();
+        
+        // Generate a unique session token for this specific login instance
+        const newSessionId = Date.now().toString() + Math.random().toString(36).substring(7);
+        const updatedUser = { ...userData, currentSessionId: newSessionId };
+
+        // Save the new session to the DB, invalidating any other active logins
+        await fetch(`${API_BASE_URL}/${userData.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedUser)
+        });
+
+        setLoggedInUser(updatedUser);
+        if (updatedUser.userType === 'admin') loadUsers();
       } else {
         const errorData = await response.json().catch(() => null);
         showMessage(errorData?.message || "Invalid credentials or account pending approval.", true);
       }
     } catch (error) {
-      showMessage("Server connection failed.", true);
+      showMessage("Server connection failed. If using Render free tier, please wait 50 seconds and try again.", true);
     } finally {
       setIsLoading(false);
     }
@@ -104,7 +143,29 @@ function App() {
       const data = await response.json();
       setUsers(data);
     } catch (error) {
-      showMessage("Failed to sync users.", true);
+      console.error("Background sync failed");
+    }
+  };
+
+  // 👑 ADMIN ACTION: Force Logout a specific user
+  const handleForceLogout = async (targetUser) => {
+    if (!window.confirm(`Are you sure you want to force logout ${targetUser.name}? They will be kicked immediately.`)) return;
+    try {
+      // Wipe their session ID in the database. 
+      // Their frontend will detect this on the next 5-second tick and log them out.
+      const updatedUser = { ...targetUser, currentSessionId: null };
+      const response = await fetch(`${API_BASE_URL}/${targetUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUser)
+      });
+      
+      if (response.ok) {
+        showMessage(`Session terminated for ${targetUser.name}.`);
+        loadUsers();
+      }
+    } catch (error) {
+      showMessage("Failed to terminate session.", true);
     }
   };
 
@@ -152,10 +213,13 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = (customMessage = null) => {
     setLoggedInUser(null);
     setLoginForm({ email: '', password: '' });
     setCurrentView('login');
+    if (customMessage && typeof customMessage === 'string') {
+      showMessage(customMessage, true);
+    }
   };
 
   const activeUsers = users.filter(u => u.status !== 'PENDING' && (u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
@@ -181,7 +245,7 @@ function App() {
                 <label>Password</label>
                 <input type="password" required value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} />
               </div>
-              <button type="submit" disabled={isLoading}>{isLoading ? 'Authenticating...' : 'Sign In'}</button>
+              <button type="submit" className="btn-primary" disabled={isLoading}>{isLoading ? 'Authenticating...' : 'Sign In'}</button>
               <p className="auth-switch">New here? <span onClick={() => setCurrentView('register')}>Create an account</span></p>
             </form>
           ) : (
@@ -205,7 +269,7 @@ function App() {
                   <option value="admin">Administrator (Requires Approval)</option>
                 </select>
               </div>
-              <button type="submit" disabled={isLoading}>{isLoading ? 'Processing...' : 'Register Account'}</button>
+              <button type="submit" className="btn-primary" disabled={isLoading}>{isLoading ? 'Processing...' : 'Register Account'}</button>
               <p className="auth-switch">Already have an account? <span onClick={() => setCurrentView('login')}>Sign in</span></p>
             </form>
           )}
@@ -227,7 +291,6 @@ function App() {
         <div className="sidebar-menu">
           <div className="menu-item active">Dashboard</div>
           
-          {/* PENDING APPROVALS IN SIDEBAR */}
           {loggedInUser.userType === 'admin' && pendingAdmins.length > 0 && (
             <div className="sidebar-pending">
               <h4 className="sidebar-heading">Pending Approvals ({pendingAdmins.length})</h4>
@@ -262,7 +325,11 @@ function App() {
               <span className="user-role">{loggedInUser.userType}</span>
             </div>
           </div>
-          <button className="btn-logout" onClick={handleLogout}>Logout</button>
+          
+          {/* Only Admins can manually log out */}
+          {loggedInUser.userType === 'admin' && (
+            <button className="btn-logout" onClick={() => handleLogout()}>Logout Manually</button>
+          )}
         </div>
       </aside>
 
@@ -270,9 +337,6 @@ function App() {
       <main className="main-content">
         <header className="content-header">
           <h1>Overview</h1>
-          {loggedInUser.userType === 'admin' && (
-            <button className="btn-primary" onClick={loadUsers}>Refresh Data</button>
-          )}
         </header>
 
         {loggedInUser.userType === 'admin' ? (
@@ -303,7 +367,12 @@ function App() {
               <div className="table-scroll-wrapper">
                 <table className="data-table">
                   <thead>
-                    <tr><th>User</th><th>Email Address</th><th>Role</th><th className="text-right">Actions</th></tr>
+                    <tr>
+                      <th>User</th>
+                      <th>Status</th>
+                      <th>Role</th>
+                      <th className="text-right">Admin Actions</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {activeUsers.map(user => (
@@ -311,18 +380,43 @@ function App() {
                         <td>
                           <div className="table-user-cell">
                             <div className="avatar-small">{user.name.charAt(0)}</div>
-                            <span className="fw-600">{user.name}</span>
+                            <div className="user-info-stack">
+                              <span className="fw-600">{user.name}</span>
+                              <span className="text-muted" style={{fontSize: '12px'}}>{user.email}</span>
+                            </div>
                           </div>
                         </td>
-                        <td className="text-muted">{user.email}</td>
                         <td>
-                          <select className={`role-select ${user.userType === 'admin' ? 'role-admin' : 'role-user'}`} value={user.userType} onChange={(e) => handleRoleChange(user, e.target.value)}>
+                          {user.currentSessionId ? (
+                             <span className="status-badge online">● Online</span>
+                          ) : (
+                             <span className="status-badge offline">○ Offline</span>
+                          )}
+                        </td>
+                        <td>
+                          <select className={`role-select ${user.userType === 'admin' ? 'role-admin' : 'role-user'}`} value={user.userType} onChange={(e) => handleRoleChange(user, e.target.value)} disabled={user.id === loggedInUser.id}>
                             <option value="user">Standard</option>
                             <option value="admin">Admin</option>
                           </select>
                         </td>
-                        <td className="text-right">
-                          <button className="btn-icon danger" onClick={() => handleDelete(user.id)}>Delete</button>
+                        <td className="text-right actions-cell">
+                          {/* Force Logout Button */}
+                          <button 
+                            className="btn-text warning" 
+                            onClick={() => handleForceLogout(user)}
+                            disabled={!user.currentSessionId || user.id === loggedInUser.id}
+                            title={user.id === loggedInUser.id ? "Cannot force logout yourself" : "End this user's session"}
+                          >
+                            Force Logout
+                          </button>
+                          {/* Delete Button */}
+                          <button 
+                            className="btn-text danger" 
+                            onClick={() => handleDelete(user.id)}
+                            disabled={user.id === loggedInUser.id}
+                          >
+                            Delete
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -334,9 +428,31 @@ function App() {
         ) : (
           /* USER VIEW */
           <div className="user-view">
-             <div className="stat-card">
-               <h2>Welcome back, {loggedInUser.name}!</h2>
-               <p className="text-muted" style={{ marginTop: '10px' }}>Your standard user account is currently active.</p>
+             <div className="profile-card">
+                <div className="profile-header">
+                  <div className="avatar-large">{loggedInUser.name.charAt(0)}</div>
+                  <div>
+                    <h2>{loggedInUser.name}</h2>
+                    <span className="badge badge-user">Standard User</span>
+                  </div>
+                </div>
+                <div className="profile-body">
+                  <div className="info-group">
+                    <label>Email Address</label>
+                    <p>{loggedInUser.email}</p>
+                  </div>
+                  <div className="info-group">
+                    <label>Account Status</label>
+                    <p style={{ color: 'var(--success)', fontWeight: 'bold' }}>Active & Verified</p>
+                  </div>
+                  <div className="info-group" style={{ background: 'var(--bg-main)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)'}}>
+                    <label>Session Information</label>
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                      Your session is secure and will automatically log out in <strong>{formatTime(timeLeft)}</strong>. 
+                      Manual logout capabilities are restricted to administrators. Logging in from another device will automatically terminate this session.
+                    </p>
+                  </div>
+                </div>
              </div>
           </div>
         )}
@@ -345,4 +461,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;
