@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8080/users';
+const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
 const SESSION_DURATION = 15 * 60; // 15 minutes in seconds
 
 function App() {
@@ -345,4 +345,4 @@ function App() {
   );
 }
 
-export default App;
+export default App; 
