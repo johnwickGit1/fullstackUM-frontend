@@ -36,23 +36,19 @@ function App() {
       // 2. Multi-Device / Admin Force-Logout Monitor
       syncInterval = setInterval(async () => {
         try {
-          // Fetch the latest directory to check our own status
           const response = await fetch(API_BASE_URL);
           const latestUsers = await response.json();
-          setUsers(latestUsers); // Keeps admin tables auto-updated too
+          setUsers(latestUsers); 
 
           const me = latestUsers.find(u => u.id === loggedInUser.id);
           
-          if (me) {
-            // If the session ID doesn't match, or it was wiped to null
-            if (me.currentSessionId !== loggedInUser.currentSessionId) {
-              handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.");
-            }
+          if (me && me.currentSessionId !== loggedInUser.currentSessionId) {
+            handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.");
           }
         } catch (error) {
-          // Silently ignore network blips during polling
+          // Silently ignore network blips
         }
-      }, 5000); // Check every 5 seconds
+      }, 5000); 
     } else {
       setTimeLeft(SESSION_DURATION); 
     }
@@ -113,11 +109,11 @@ function App() {
       if (response.ok) {
         const userData = await response.json();
         
-        // Generate a unique session token for this specific login instance
+        // Generate a unique session token for this login
         const newSessionId = Date.now().toString() + Math.random().toString(36).substring(7);
         const updatedUser = { ...userData, currentSessionId: newSessionId };
 
-        // Save the new session to the DB, invalidating any other active logins
+        // Save session to DB
         await fetch(`${API_BASE_URL}/${userData.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -147,12 +143,10 @@ function App() {
     }
   };
 
-  // 👑 ADMIN ACTION: Force Logout a specific user
+  // 👑 ADMIN ACTION: Force Logout
   const handleForceLogout = async (targetUser) => {
-    if (!window.confirm(`Are you sure you want to force logout ${targetUser.name}? They will be kicked immediately.`)) return;
+    if (!window.confirm(`Are you sure you want to force logout ${targetUser.name}?`)) return;
     try {
-      // Wipe their session ID in the database. 
-      // Their frontend will detect this on the next 5-second tick and log them out.
       const updatedUser = { ...targetUser, currentSessionId: null };
       const response = await fetch(`${API_BASE_URL}/${targetUser.id}`, {
         method: 'PUT',
@@ -178,7 +172,7 @@ function App() {
         body: JSON.stringify(updatedUser)
       });
       if (response.ok) {
-        showMessage(`${targetUser.name} has been approved as an Admin!`);
+        showMessage(`${targetUser.name} has been approved!`);
         loadUsers(); 
       }
     } catch (error) {
@@ -214,6 +208,14 @@ function App() {
   };
 
   const handleLogout = (customMessage = null) => {
+    if (loggedInUser && loggedInUser.currentSessionId) {
+       // Clear session on backend when manually logging out
+       fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
+         method: 'PUT',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ ...loggedInUser, currentSessionId: null })
+       }).catch(() => {}); 
+    }
     setLoggedInUser(null);
     setLoginForm({ email: '', password: '' });
     setCurrentView('login');
@@ -288,22 +290,30 @@ function App() {
           <div className="logo-placeholder"></div>
           <h3>System<strong>UI</strong></h3>
         </div>
+        
         <div className="sidebar-menu">
-          <div className="menu-item active">Dashboard</div>
+          <div className="menu-item active">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '10px'}}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+            Dashboard
+          </div>
           
+          {/* NEAT SIDEBAR PENDING QUEUE */}
           {loggedInUser.userType === 'admin' && pendingAdmins.length > 0 && (
-            <div className="sidebar-pending">
-              <h4 className="sidebar-heading">Pending Approvals ({pendingAdmins.length})</h4>
-              <div className="pending-list">
+            <div className="sidebar-section">
+              <div className="sidebar-section-header">
+                <span>Pending Approvals</span>
+                <span className="badge-count">{pendingAdmins.length}</span>
+              </div>
+              <div className="pending-scroll-area">
                 {pendingAdmins.map(user => (
-                  <div key={user.id} className="pending-card">
-                    <div className="pending-info">
-                      <span className="pending-name" title={user.name}>{user.name}</span>
-                      <span className="pending-email" title={user.email}>{user.email}</span>
+                  <div key={user.id} className="sidebar-pending-card">
+                    <div className="pending-details">
+                      <strong>{user.name}</strong>
+                      <span>{user.email}</span>
                     </div>
-                    <div className="pending-actions">
-                      <button className="btn-approve" onClick={() => handleApprove(user)} title="Approve">✓</button>
-                      <button className="btn-reject" onClick={() => handleDelete(user.id)} title="Reject">✕</button>
+                    <div className="pending-actions-row">
+                      <button className="btn-sidebar-approve" onClick={() => handleApprove(user)}>Approve</button>
+                      <button className="btn-sidebar-reject" onClick={() => handleDelete(user.id)}>Reject</button>
                     </div>
                   </div>
                 ))}
@@ -313,22 +323,21 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
-          {/* SESSION TIMER */}
-          <div className="session-timer">
-            <span>Session ends in: <strong>{formatTime(timeLeft)}</strong></span>
+          <div className="session-timer-box">
+            <div className="timer-label">Session ends in</div>
+            <div className="timer-value">{formatTime(timeLeft)}</div>
           </div>
 
-          <div className="user-badge">
+          <div className="user-profile-sm">
             <div className="avatar">{loggedInUser.name.charAt(0)}</div>
-            <div className="user-info">
-              <span className="user-name">{loggedInUser.name}</span>
-              <span className="user-role">{loggedInUser.userType}</span>
+            <div className="user-details">
+              <span className="name">{loggedInUser.name}</span>
+              <span className="role">{loggedInUser.userType}</span>
             </div>
           </div>
           
-          {/* Only Admins can manually log out */}
           {loggedInUser.userType === 'admin' && (
-            <button className="btn-logout" onClick={() => handleLogout()}>Logout Manually</button>
+            <button className="btn-logout" onClick={() => handleLogout()}>Log Out Manually</button>
           )}
         </div>
       </aside>
@@ -336,7 +345,10 @@ function App() {
       {/* MAIN CONTENT */}
       <main className="main-content">
         <header className="content-header">
-          <h1>Overview</h1>
+          <div>
+            <h1>Overview</h1>
+            <p className="text-muted" style={{marginTop: '4px'}}>Manage system users and active sessions.</p>
+          </div>
         </header>
 
         {loggedInUser.userType === 'admin' ? (
@@ -400,16 +412,16 @@ function App() {
                           </select>
                         </td>
                         <td className="text-right actions-cell">
-                          {/* Force Logout Button */}
+                          {/* 🚨 THE FORCE LOGOUT BUTTON */}
                           <button 
                             className="btn-text warning" 
                             onClick={() => handleForceLogout(user)}
                             disabled={!user.currentSessionId || user.id === loggedInUser.id}
-                            title={user.id === loggedInUser.id ? "Cannot force logout yourself" : "End this user's session"}
+                            title={!user.currentSessionId ? "User is already offline" : "Kick this user"}
                           >
                             Force Logout
                           </button>
-                          {/* Delete Button */}
+                          
                           <button 
                             className="btn-text danger" 
                             onClick={() => handleDelete(user.id)}
