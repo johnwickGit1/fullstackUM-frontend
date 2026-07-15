@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users'; // Remember to keep your actual URL here
+const API_BASE_URL = 'https://your-backend-name.onrender.com/users'; // Remember to put your Render URL here!
 const SESSION_DURATION = 15 * 60; // 15 minutes in seconds
 
 function App() {
@@ -22,17 +22,19 @@ function App() {
     let syncInterval;
 
     if (loggedInUser) {
-      // 1. The 15-Minute Countdown (Fully Active)
+      // 1. The 15-Minute Countdown 
       timerInterval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
-            handleLogout("Your 15-minute session has naturally expired.");
+            // Natural timeout -> We DO want to clear the DB so they show as offline
+            handleLogout("Your 15-minute session has naturally expired.", false);
             return SESSION_DURATION;
           }
           return prev - 1;
         });
       }, 1000);
 
+      // 2. The 5-Second Polling Loop
       syncInterval = setInterval(async () => {
         try {
           const response = await fetch(API_BASE_URL);
@@ -41,20 +43,22 @@ function App() {
 
           const me = latestUsers.find(u => u.id === loggedInUser.id);
           if (me && me.currentSessionId !== loggedInUser.currentSessionId) {
-            handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.");
+            // 🚨 MUTUAL DESTRUCTION FIX: 
+            // Pass 'true' at the end to skip wiping the DB.
+            // If we wipe the DB here, we accidentally kick out the NEW device!
+            handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.", true);
           }
         } catch (error) {
           // Silently ignore network blips
         }
       }, 5000); 
-      
     } else {
       setTimeLeft(SESSION_DURATION); 
     }
 
     return () => {
       clearInterval(timerInterval);
-      // clearInterval(syncInterval); // Uncomment this later too
+      clearInterval(syncInterval);
     };
   }, [loggedInUser]);
 
@@ -114,7 +118,7 @@ function App() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updatedUser)
-        }).catch(() => {}); // Catch prevents failure if backend isn't updated yet
+        }).catch(() => {});
 
         setLoggedInUser(updatedUser);
         if (updatedUser.userType === 'admin') loadUsers();
@@ -201,17 +205,21 @@ function App() {
     }
   };
 
-  const handleLogout = (customMessage = null) => {
-    if (loggedInUser && loggedInUser.currentSessionId) {
+  // 🚨 MUTUAL DESTRUCTION FIX: Added skipDbUpdate flag
+  const handleLogout = (customMessage = null, skipDbUpdate = false) => {
+    // Only wipe the database if the user clicked "Logout" manually or the 15m timer expired.
+    if (!skipDbUpdate && loggedInUser && loggedInUser.currentSessionId) {
        fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
          method: 'PUT',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({ ...loggedInUser, currentSessionId: null })
        }).catch(() => {}); 
     }
+    
     setLoggedInUser(null);
     setLoginForm({ email: '', password: '' });
     setCurrentView('login');
+    
     if (customMessage && typeof customMessage === 'string') {
       showMessage(customMessage, true);
     }
