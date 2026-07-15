@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users'; 
-const SESSION_DURATION = 15 * 60; // 15 minutes
+const API_BASE_URL = 'https://your-backend-name.onrender.com/users'; // Remember to keep your actual URL here
+const SESSION_DURATION = 15 * 60; // 15 minutes in seconds
 
 function App() {
   const [currentView, setCurrentView] = useState('login'); 
@@ -16,13 +16,13 @@ function App() {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', userType: 'user' });
 
-  // ⏱️ Session Enforcer (Timer + Single-Session Tracker)
+  // ⏱️ Session Timer Effect
   useEffect(() => {
     let timerInterval;
     let syncInterval;
 
     if (loggedInUser) {
-      // 1. 15-Minute Countdown
+      // 1. The 15-Minute Countdown (Fully Active)
       timerInterval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -33,7 +33,6 @@ function App() {
         });
       }, 1000);
 
-      // 2. Multi-Device / Admin Force-Logout Monitor
       syncInterval = setInterval(async () => {
         try {
           const response = await fetch(API_BASE_URL);
@@ -41,7 +40,6 @@ function App() {
           setUsers(latestUsers); 
 
           const me = latestUsers.find(u => u.id === loggedInUser.id);
-          
           if (me && me.currentSessionId !== loggedInUser.currentSessionId) {
             handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.");
           }
@@ -49,13 +47,14 @@ function App() {
           // Silently ignore network blips
         }
       }, 5000); 
+      
     } else {
       setTimeLeft(SESSION_DURATION); 
     }
 
     return () => {
       clearInterval(timerInterval);
-      clearInterval(syncInterval);
+      // clearInterval(syncInterval); // Uncomment this later too
     };
   }, [loggedInUser]);
 
@@ -108,17 +107,14 @@ function App() {
       
       if (response.ok) {
         const userData = await response.json();
-        
-        // Generate a unique session token for this login
         const newSessionId = Date.now().toString() + Math.random().toString(36).substring(7);
         const updatedUser = { ...userData, currentSessionId: newSessionId };
 
-        // Save session to DB
         await fetch(`${API_BASE_URL}/${userData.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updatedUser)
-        });
+        }).catch(() => {}); // Catch prevents failure if backend isn't updated yet
 
         setLoggedInUser(updatedUser);
         if (updatedUser.userType === 'admin') loadUsers();
@@ -143,7 +139,6 @@ function App() {
     }
   };
 
-  // 👑 ADMIN ACTION: Force Logout
   const handleForceLogout = async (targetUser) => {
     if (!window.confirm(`Are you sure you want to force logout ${targetUser.name}?`)) return;
     try {
@@ -153,7 +148,6 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser)
       });
-      
       if (response.ok) {
         showMessage(`Session terminated for ${targetUser.name}.`);
         loadUsers();
@@ -209,7 +203,6 @@ function App() {
 
   const handleLogout = (customMessage = null) => {
     if (loggedInUser && loggedInUser.currentSessionId) {
-       // Clear session on backend when manually logging out
        fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
          method: 'PUT',
          headers: { 'Content-Type': 'application/json' },
@@ -297,7 +290,6 @@ function App() {
             Dashboard
           </div>
           
-          {/* NEAT SIDEBAR PENDING QUEUE */}
           {loggedInUser.userType === 'admin' && pendingAdmins.length > 0 && (
             <div className="sidebar-section">
               <div className="sidebar-section-header">
@@ -349,12 +341,14 @@ function App() {
             <h1>Overview</h1>
             <p className="text-muted" style={{marginTop: '4px'}}>Manage system users and active sessions.</p>
           </div>
+          {loggedInUser.userType === 'admin' && (
+            <button className="btn-primary" onClick={loadUsers} style={{marginTop: '0'}}>Refresh Data</button>
+          )}
         </header>
 
         {loggedInUser.userType === 'admin' ? (
           <div className="admin-view">
             
-            {/* STATS GRID */}
             <div className="stats-grid">
               <div className="stat-card">
                 <h4>Total Active Users</h4>
@@ -370,7 +364,6 @@ function App() {
               </div>
             </div>
 
-            {/* MAIN DATA TABLE */}
             <div className="table-container">
               <div className="table-toolbar">
                 <h3>Active Directory</h3>
@@ -412,12 +405,11 @@ function App() {
                           </select>
                         </td>
                         <td className="text-right actions-cell">
-                          {/* 🚨 THE FORCE LOGOUT BUTTON */}
                           <button 
                             className="btn-text warning" 
                             onClick={() => handleForceLogout(user)}
                             disabled={!user.currentSessionId || user.id === loggedInUser.id}
-                            title={!user.currentSessionId ? "User is already offline" : "Kick this user"}
+                            title={!user.currentSessionId ? "User is offline" : "Kick this user"}
                           >
                             Force Logout
                           </button>
@@ -438,7 +430,6 @@ function App() {
             </div>
           </div>
         ) : (
-          /* USER VIEW */
           <div className="user-view">
              <div className="profile-card">
                 <div className="profile-header">
