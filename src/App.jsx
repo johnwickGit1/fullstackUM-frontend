@@ -26,7 +26,6 @@ function App() {
       timerInterval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
-            // Natural timeout -> We DO want to clear the DB so they show as offline
             handleLogout("Your 15-minute session has naturally expired.", false);
             return SESSION_DURATION;
           }
@@ -34,7 +33,7 @@ function App() {
         });
       }, 1000);
 
-      // 2. The 5-Second Polling Loop
+      // 2. The 5-Second Polling Loop (Mutual Destruction Fixed)
       syncInterval = setInterval(async () => {
         try {
           const response = await fetch(API_BASE_URL);
@@ -43,9 +42,6 @@ function App() {
 
           const me = latestUsers.find(u => u.id === loggedInUser.id);
           if (me && me.currentSessionId !== loggedInUser.currentSessionId) {
-            // 🚨 MUTUAL DESTRUCTION FIX: 
-            // Pass 'true' at the end to skip wiping the DB.
-            // If we wipe the DB here, we accidentally kick out the NEW device!
             handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.", true);
           }
         } catch (error) {
@@ -205,9 +201,7 @@ function App() {
     }
   };
 
-  // 🚨 MUTUAL DESTRUCTION FIX: Added skipDbUpdate flag
   const handleLogout = (customMessage = null, skipDbUpdate = false) => {
-    // Only wipe the database if the user clicked "Logout" manually or the 15m timer expired.
     if (!skipDbUpdate && loggedInUser && loggedInUser.currentSessionId) {
        fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
          method: 'PUT',
@@ -336,9 +330,9 @@ function App() {
             </div>
           </div>
           
-          {loggedInUser.userType === 'admin' && (
-            <button className="btn-logout" onClick={() => handleLogout()}>Log Out Manually</button>
-          )}
+          {}
+          <button className="btn-logout" onClick={() => handleLogout()}>Log Out</button>
+          
         </div>
       </aside>
 
@@ -460,7 +454,7 @@ function App() {
                     <label>Session Information</label>
                     <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
                       Your session is secure and will automatically log out in <strong>{formatTime(timeLeft)}</strong>. 
-                      Manual logout capabilities are restricted to administrators. Logging in from another device will automatically terminate this session.
+                      Logging in from another device will automatically terminate this session.
                     </p>
                   </div>
                 </div>
