@@ -3,7 +3,7 @@ import './App.css';
 
 const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
 const SESSION_DURATION = 15 * 60; // 15 minutes, in seconds
-const FORCE_LOGOUT_POLL_MS = 20000; // how often a signed-in standard user checks for a forced sign-out
+const SESSION_POLL_MS = 20000; // how often a signed-in user checks its session is still current
 
 /* ================= ICONS =================
    Small inline SVGs so the app has zero icon-library dependency. */
@@ -34,6 +34,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [timeLeft, setTimeLeft] = useState(SESSION_DURATION);
+  const [sessionToken, setSessionToken] = useState(null);
   const warnedRef = useRef(false);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -85,9 +86,12 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft]);
 
-  // ---- Admin force-logout polling (standard users only) -------------
-  // Assumes the backend user record exposes a `forceLogout` boolean and
-  // supports GET /users/:id. Adjust the endpoint if your API differs.
+  // ---- Session validity polling (standard users only) ---------------
+  // Every login stamps a fresh currentSessionId onto the user record
+  // (see loginUser in the backend). If an admin force-logs-out this user,
+  // or the account signs in elsewhere, currentSessionId changes server-side
+  // and no longer matches the token this tab captured at login — so we
+  // sign out locally the next time we notice.
   useEffect(() => {
     if (!loggedInUser || loggedInUser.userType === 'admin') return;
     const poll = setInterval(async () => {
@@ -95,21 +99,16 @@ function App() {
         const res = await fetch(`${API_BASE_URL}/${loggedInUser.id}`);
         if (!res.ok) return;
         const data = await res.json();
-        if (data.forceLogout) {
-          showMessage('You were signed out by an administrator.', true);
-          fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...data, forceLogout: false })
-          }).catch(() => {});
+        if (data.currentSessionId !== sessionToken) {
+          showMessage('Your session ended — signed out by an administrator or from another device.', true);
           handleLogout();
         }
       } catch (error) {
         // Silent on transient network errors — don't spam the toast every 20s.
       }
-    }, FORCE_LOGOUT_POLL_MS);
+    }, SESSION_POLL_MS);
     return () => clearInterval(poll);
-  }, [loggedInUser?.id, loggedInUser?.userType]);
+  }, [loggedInUser?.id, loggedInUser?.userType, sessionToken]);
 
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0');
@@ -157,6 +156,7 @@ function App() {
       if (response.ok) {
         const userData = await response.json();
         setLoggedInUser(userData);
+        setSessionToken(userData.currentSessionId ?? null);
         if (userData.userType === 'admin') loadUsers();
       } else {
         const errorData = await response.json().catch(() => null);
@@ -250,7 +250,7 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...user, forceLogout: true })
+        body: JSON.stringify({ ...user, currentSessionId: null })
       });
       if (response.ok) {
         showMessage(`${user.name} has been signed out.`);
@@ -273,6 +273,7 @@ function App() {
 
   const handleLogout = () => {
     setLoggedInUser(null);
+    setSessionToken(null);
     setLoginForm({ email: '', password: '' });
     setCurrentView('login');
   };
