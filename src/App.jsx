@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
+const API_BASE_URL = 'http://localhost:8080/users';
 const SESSION_DURATION = 15 * 60; // 15 minutes, in seconds
 const SESSION_POLL_MS = 20000; // how often a signed-in user checks its session is still current
 
@@ -86,14 +86,17 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft]);
 
-  // ---- Session validity polling (standard users only) ---------------
+  // ---- Session validity polling (every logged-in user) ---------------
   // Every login stamps a fresh currentSessionId onto the user record
-  // (see loginUser in the backend). If an admin force-logs-out this user,
-  // or the account signs in elsewhere, currentSessionId changes server-side
-  // and no longer matches the token this tab captured at login — so we
-  // sign out locally the next time we notice.
+  // (see loginUser in the backend). If this account logs in elsewhere,
+  // or an admin force-logs this user out, currentSessionId changes
+  // server-side and no longer matches the token this tab captured at
+  // login — so we sign out locally the next time we notice. This applies
+  // to admins too: it's a "was I superseded" check, not the admin-only
+  // force-logout action (that one stays limited to standard-user rows
+  // in the directory table).
   useEffect(() => {
-    if (!loggedInUser || loggedInUser.userType === 'admin') return;
+    if (!loggedInUser) return;
     const poll = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/${loggedInUser.id}`);
