@@ -1,72 +1,42 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users'; // Remember to put your Render URL here!
-const SESSION_DURATION = 15 * 60; // 15 minutes in seconds
+const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
+
+/* ================= ICONS =================
+   Small inline SVGs so the app has zero icon-library dependency. */
+const Icon = ({ children, size = 16, ...props }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    {children}
+  </svg>
+);
+const IconCheck = (p) => <Icon {...p}><path d="M20 6 9 17l-5-5" /></Icon>;
+const IconX = (p) => <Icon {...p}><path d="M18 6 6 18M6 6l12 12" /></Icon>;
+const IconAlert = (p) => <Icon {...p}><path d="M12 9v4M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /></Icon>;
+const IconRefresh = (p) => <Icon {...p}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></Icon>;
+const IconSearch = (p) => <Icon {...p}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></Icon>;
+const IconLogout = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></Icon>;
+const IconTrash = (p) => <Icon {...p}><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></Icon>;
+const IconUsers = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Icon>;
+const IconShield = (p) => <Icon {...p}><path d="M12 2 4 5v6c0 5 3.4 8.9 8 11 4.6-2.1 8-6 8-11V5l-8-3Z" /></Icon>;
 
 function App() {
-  const [currentView, setCurrentView] = useState('login'); 
+  const [currentView, setCurrentView] = useState('login');
   const [message, setMessage] = useState({ text: '', isError: false });
   const [users, setUsers] = useState([]);
-  const [loggedInUser, setLoggedInUser] = useState(null); 
+  const [loggedInUser, setLoggedInUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [timeLeft, setTimeLeft] = useState(SESSION_DURATION);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', userType: 'user' });
 
-  // ⏱️ Session Timer Effect
-  useEffect(() => {
-    let timerInterval;
-    let syncInterval;
-
-    if (loggedInUser) {
-      // 1. The 15-Minute Countdown 
-      timerInterval = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            handleLogout("Your 15-minute session has naturally expired.", false);
-            return SESSION_DURATION;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      // 2. The 5-Second Polling Loop (Mutual Destruction Fixed)
-      syncInterval = setInterval(async () => {
-        try {
-          const response = await fetch(API_BASE_URL);
-          const latestUsers = await response.json();
-          setUsers(latestUsers); 
-
-          const me = latestUsers.find(u => u.id === loggedInUser.id);
-          if (me && me.currentSessionId !== loggedInUser.currentSessionId) {
-            handleLogout("You were logged out. Someone signed into this account from another location, or an Admin terminated your session.", true);
-          }
-        } catch (error) {
-          // Silently ignore network blips
-        }
-      }, 5000); 
-    } else {
-      setTimeLeft(SESSION_DURATION); 
-    }
-
-    return () => {
-      clearInterval(timerInterval);
-      clearInterval(syncInterval);
-    };
-  }, [loggedInUser]);
-
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
   const showMessage = (text, isError = false) => {
     setMessage({ text, isError });
-    setTimeout(() => setMessage({ text: '', isError: false }), 6000);
+    setTimeout(() => setMessage({ text: '', isError: false }), 5000);
   };
 
   const handleRegister = async (e) => {
@@ -79,17 +49,17 @@ function App() {
         body: JSON.stringify(regForm)
       });
       if (response.ok) {
-        const msg = regForm.userType === 'admin' 
-          ? "Admin request submitted! Waiting for approval." 
-          : "Account created successfully! Please login.";
+        const msg = regForm.userType === 'admin'
+          ? 'Admin request submitted! Waiting for approval.'
+          : 'Account created successfully! Please login.';
         showMessage(msg);
         setCurrentView('login');
         setRegForm({ name: '', email: '', password: '', userType: 'user' });
       } else {
-        showMessage("Registration failed.", true);
+        showMessage('Registration failed.', true);
       }
     } catch (error) {
-      showMessage("Server error.", true);
+      showMessage('Server error.', true);
     } finally {
       setIsLoading(false);
     }
@@ -104,56 +74,32 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm)
       });
-      
+
       if (response.ok) {
         const userData = await response.json();
-        const newSessionId = Date.now().toString() + Math.random().toString(36).substring(7);
-        const updatedUser = { ...userData, currentSessionId: newSessionId };
-
-        await fetch(`${API_BASE_URL}/${userData.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedUser)
-        }).catch(() => {});
-
-        setLoggedInUser(updatedUser);
-        if (updatedUser.userType === 'admin') loadUsers();
+        setLoggedInUser(userData);
+        if (userData.userType === 'admin') loadUsers();
       } else {
         const errorData = await response.json().catch(() => null);
-        showMessage(errorData?.message || "Invalid credentials or account pending approval.", true);
+        showMessage(errorData?.message || 'Invalid credentials or account pending approval.', true);
       }
     } catch (error) {
-      showMessage("Server connection failed. If using Render free tier, please wait 50 seconds and try again.", true);
+      showMessage('Server connection failed.', true);
     } finally {
       setIsLoading(false);
     }
   };
 
   const loadUsers = async () => {
+    setIsSyncing(true);
     try {
       const response = await fetch(API_BASE_URL);
       const data = await response.json();
       setUsers(data);
     } catch (error) {
-      console.error("Background sync failed");
-    }
-  };
-
-  const handleForceLogout = async (targetUser) => {
-    if (!window.confirm(`Are you sure you want to force logout ${targetUser.name}?`)) return;
-    try {
-      const updatedUser = { ...targetUser, currentSessionId: null };
-      const response = await fetch(`${API_BASE_URL}/${targetUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedUser)
-      });
-      if (response.ok) {
-        showMessage(`Session terminated for ${targetUser.name}.`);
-        loadUsers();
-      }
-    } catch (error) {
-      showMessage("Failed to terminate session.", true);
+      showMessage('Failed to sync users.', true);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -166,11 +112,11 @@ function App() {
         body: JSON.stringify(updatedUser)
       });
       if (response.ok) {
-        showMessage(`${targetUser.name} has been approved!`);
-        loadUsers(); 
+        showMessage(`${targetUser.name} has been approved as an Admin!`);
+        loadUsers();
       }
     } catch (error) {
-      showMessage("Error approving user.", true);
+      showMessage('Error approving user.', true);
     }
   };
 
@@ -184,89 +130,117 @@ function App() {
       });
       if (response.ok) loadUsers();
     } catch (error) {
-      showMessage("Error updating role.", true);
+      showMessage('Error updating role.', true);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm(`Are you sure? This cannot be undone.`)) return;
+  const performDelete = async (id) => {
     try {
       const response = await fetch(`${API_BASE_URL}/${id}`, { method: 'DELETE' });
       if (response.ok) {
-        showMessage("Account removed.");
+        showMessage('Account removed.');
         loadUsers();
       }
     } catch (error) {
-      showMessage("Failed to delete user.", true);
+      showMessage('Failed to delete user.', true);
+    } finally {
+      setConfirmDialog(null);
     }
   };
 
-  const handleLogout = (customMessage = null, skipDbUpdate = false) => {
-    if (!skipDbUpdate && loggedInUser && loggedInUser.currentSessionId) {
-       fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
-         method: 'PUT',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ ...loggedInUser, currentSessionId: null })
-       }).catch(() => {}); 
-    }
-    
+  const requestDelete = (user) => {
+    setConfirmDialog({
+      title: 'Remove account',
+      message: `This permanently removes ${user.name}'s account and cannot be undone.`,
+      confirmLabel: 'Remove account',
+      onConfirm: () => performDelete(user.id)
+    });
+  };
+
+  const requestReject = (user) => {
+    setConfirmDialog({
+      title: 'Reject admin request',
+      message: `${user.name} will not be granted admin access. Their pending request will be removed.`,
+      confirmLabel: 'Reject request',
+      onConfirm: () => performDelete(user.id)
+    });
+  };
+
+  const handleLogout = () => {
     setLoggedInUser(null);
     setLoginForm({ email: '', password: '' });
     setCurrentView('login');
-    
-    if (customMessage && typeof customMessage === 'string') {
-      showMessage(customMessage, true);
-    }
   };
 
-  const activeUsers = users.filter(u => u.status !== 'PENDING' && (u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())));
+  // Data splitting: active vs. pending, with search applied only to active users
+  const allActiveUsers = users.filter(u => u.status !== 'PENDING');
+  const activeUsers = allActiveUsers.filter(u =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
   const pendingAdmins = users.filter(u => u.status === 'PENDING');
-  const totalAdmins = activeUsers.filter(u => u.userType === 'admin').length;
+  const totalAdmins = allActiveUsers.filter(u => u.userType === 'admin').length;
 
+  // ================= RENDER LOGGED OUT =================
   if (!loggedInUser) {
     return (
       <div className="auth-layout">
-        {message.text && <div className={`toast ${message.isError ? 'error' : 'success'}`}>{message.text}</div>}
+        {message.text && (
+          <div className={`toast ${message.isError ? 'error' : 'success'}`} role="status" aria-live="polite">
+            {message.isError ? <IconX size={16} /> : <IconCheck size={16} />}
+            {message.text}
+          </div>
+        )}
+        <div className="auth-brand">
+          <div className="logo-placeholder" />
+          <span>System<strong>UI</strong></span>
+        </div>
         <div className="auth-card">
           <div className="auth-header">
-            <h2>{currentView === 'login' ? 'System Login' : 'Create Account'}</h2>
-            <p>Secure administrative access portal</p>
+            <span className="eyebrow">{currentView === 'login' ? 'System Access' : 'New Account'}</span>
+            <h2>{currentView === 'login' ? 'Sign in to continue' : 'Create your account'}</h2>
+            <p>{currentView === 'login' ? 'Enter your credentials to reach the dashboard.' : 'Standard accounts activate instantly.'}</p>
           </div>
           {currentView === 'login' ? (
             <form onSubmit={handleLogin}>
               <div className="input-group">
-                <label>Email Address</label>
-                <input type="email" required value={loginForm.email} onChange={e => setLoginForm({...loginForm, email: e.target.value})} />
+                <label htmlFor="login-email">Email Address</label>
+                <input id="login-email" type="email" autoComplete="email" required
+                  value={loginForm.email} onChange={e => setLoginForm({ ...loginForm, email: e.target.value })} />
               </div>
               <div className="input-group">
-                <label>Password</label>
-                <input type="password" required value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} />
+                <label htmlFor="login-password">Password</label>
+                <input id="login-password" type="password" autoComplete="current-password" required
+                  value={loginForm.password} onChange={e => setLoginForm({ ...loginForm, password: e.target.value })} />
               </div>
-              <button type="submit" className="btn-primary" disabled={isLoading}>{isLoading ? 'Authenticating...' : 'Sign In'}</button>
+              <button type="submit" disabled={isLoading}>{isLoading ? 'Authenticating…' : 'Sign In'}</button>
               <p className="auth-switch">New here? <span onClick={() => setCurrentView('register')}>Create an account</span></p>
             </form>
           ) : (
             <form onSubmit={handleRegister}>
               <div className="input-group">
-                <label>Full Name</label>
-                <input type="text" required value={regForm.name} onChange={e => setRegForm({...regForm, name: e.target.value})} />
+                <label htmlFor="reg-name">Full Name</label>
+                <input id="reg-name" type="text" autoComplete="name" required
+                  value={regForm.name} onChange={e => setRegForm({ ...regForm, name: e.target.value })} />
               </div>
               <div className="input-group">
-                <label>Email Address</label>
-                <input type="email" required value={regForm.email} onChange={e => setRegForm({...regForm, email: e.target.value})} />
+                <label htmlFor="reg-email">Email Address</label>
+                <input id="reg-email" type="email" autoComplete="email" required
+                  value={regForm.email} onChange={e => setRegForm({ ...regForm, email: e.target.value })} />
               </div>
               <div className="input-group">
-                <label>Password</label>
-                <input type="password" required value={regForm.password} onChange={e => setRegForm({...regForm, password: e.target.value})} />
+                <label htmlFor="reg-password">Password</label>
+                <input id="reg-password" type="password" autoComplete="new-password" required
+                  value={regForm.password} onChange={e => setRegForm({ ...regForm, password: e.target.value })} />
               </div>
               <div className="input-group">
-                <label>Account Type</label>
-                <select value={regForm.userType} onChange={e => setRegForm({...regForm, userType: e.target.value})}>
+                <label htmlFor="reg-type">Account Type</label>
+                <select id="reg-type" value={regForm.userType} onChange={e => setRegForm({ ...regForm, userType: e.target.value })}>
                   <option value="user">Standard User</option>
                   <option value="admin">Administrator (Requires Approval)</option>
                 </select>
               </div>
-              <button type="submit" className="btn-primary" disabled={isLoading}>{isLoading ? 'Processing...' : 'Register Account'}</button>
+              <button type="submit" disabled={isLoading}>{isLoading ? 'Processing…' : 'Register Account'}</button>
               <p className="auth-switch">Already have an account? <span onClick={() => setCurrentView('login')}>Sign in</span></p>
             </form>
           )}
@@ -275,64 +249,37 @@ function App() {
     );
   }
 
+  // ================= RENDER LOGGED IN =================
   return (
     <div className="dashboard-layout">
-      {message.text && <div className={`toast ${message.isError ? 'error' : 'success'}`}>{message.text}</div>}
-      
+      {message.text && (
+        <div className={`toast ${message.isError ? 'error' : 'success'}`} role="status" aria-live="polite">
+          {message.isError ? <IconX size={16} /> : <IconCheck size={16} />}
+          {message.text}
+        </div>
+      )}
+
       {/* SIDEBAR */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="logo-placeholder"></div>
+          <div className="logo-placeholder" />
           <h3>System<strong>UI</strong></h3>
         </div>
-        
         <div className="sidebar-menu">
           <div className="menu-item active">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '10px'}}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
-            Dashboard
+            {loggedInUser.userType === 'admin' ? <IconUsers size={16} /> : <IconShield size={16} />}
+            {loggedInUser.userType === 'admin' ? 'Dashboard' : 'My Profile'}
           </div>
-          
-          {loggedInUser.userType === 'admin' && pendingAdmins.length > 0 && (
-            <div className="sidebar-section">
-              <div className="sidebar-section-header">
-                <span>Pending Approvals</span>
-                <span className="badge-count">{pendingAdmins.length}</span>
-              </div>
-              <div className="pending-scroll-area">
-                {pendingAdmins.map(user => (
-                  <div key={user.id} className="sidebar-pending-card">
-                    <div className="pending-details">
-                      <strong>{user.name}</strong>
-                      <span>{user.email}</span>
-                    </div>
-                    <div className="pending-actions-row">
-                      <button className="btn-sidebar-approve" onClick={() => handleApprove(user)}>Approve</button>
-                      <button className="btn-sidebar-reject" onClick={() => handleDelete(user.id)}>Reject</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-
         <div className="sidebar-footer">
-          <div className="session-timer-box">
-            <div className="timer-label">Session ends in</div>
-            <div className="timer-value">{formatTime(timeLeft)}</div>
-          </div>
-
-          <div className="user-profile-sm">
+          <div className="user-badge">
             <div className="avatar">{loggedInUser.name.charAt(0)}</div>
-            <div className="user-details">
-              <span className="name">{loggedInUser.name}</span>
-              <span className="role">{loggedInUser.userType}</span>
+            <div className="user-info">
+              <span className="user-name">{loggedInUser.name}</span>
+              <span className="user-role">{loggedInUser.userType}</span>
             </div>
           </div>
-          
-          {}
-          <button className="btn-logout" onClick={() => handleLogout()}>Log Out</button>
-          
+          <button className="btn-logout" onClick={handleLogout}><IconLogout size={15} /> Logout</button>
         </div>
       </aside>
 
@@ -340,21 +287,54 @@ function App() {
       <main className="main-content">
         <header className="content-header">
           <div>
-            <h1>Overview</h1>
-            <p className="text-muted" style={{marginTop: '4px'}}>Manage system users and active sessions.</p>
+            <span className="eyebrow">{loggedInUser.userType === 'admin' ? 'Admin Console' : 'Account'}</span>
+            <h1>{loggedInUser.userType === 'admin' ? 'Overview' : 'My Profile'}</h1>
           </div>
           {loggedInUser.userType === 'admin' && (
-            <button className="btn-primary" onClick={loadUsers} style={{marginTop: '0'}}>Refresh Data</button>
+            <button className="btn-primary" onClick={loadUsers} disabled={isSyncing}>
+              <IconRefresh size={15} /> {isSyncing ? 'Syncing…' : 'Refresh Data'}
+            </button>
           )}
         </header>
 
         {loggedInUser.userType === 'admin' ? (
           <div className="admin-view">
-            
+
+            {/* PENDING APPROVALS QUEUE */}
+            {pendingAdmins.length > 0 && (
+              <div className="pending-alert">
+                <div className="pending-alert__stripe" />
+                <div className="pending-alert__header">
+                  <h3><IconAlert size={18} /> Action required — pending admin approvals ({pendingAdmins.length})</h3>
+                </div>
+                <table className="data-table">
+                  <tbody>
+                    {pendingAdmins.map(user => (
+                      <tr key={user.id} className="pending-row">
+                        <td><span className="fw-600">{user.name}</span><br /><span className="text-muted">{user.email}</span></td>
+                        <td><span className="tag tag-pending">Pending Admin</span></td>
+                        <td className="text-right">
+                          <div className="row-actions">
+                            <button className="btn-danger-solid" onClick={() => handleApprove(user)}>
+                              <IconCheck size={14} /> Approve
+                            </button>
+                            <button className="btn-icon danger" onClick={() => requestReject(user)}>
+                              <IconX size={14} /> Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* STATS GRID */}
             <div className="stats-grid">
               <div className="stat-card">
                 <h4>Total Active Users</h4>
-                <h2>{activeUsers.length}</h2>
+                <h2>{allActiveUsers.length}</h2>
               </div>
               <div className="stat-card">
                 <h4>Active Admins</h4>
@@ -366,20 +346,49 @@ function App() {
               </div>
             </div>
 
+            {/* ACTIVE DIRECTORY TABLE */}
             <div className="table-container">
               <div className="table-toolbar">
                 <h3>Active Directory</h3>
-                <input type="text" className="search-input" placeholder="Search active users..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <div className="search-field">
+                  <IconSearch size={15} />
+                  <input type="text" className="search-input" placeholder="Search active users…"
+                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                </div>
               </div>
-              <div className="table-scroll-wrapper">
+
+              {isSyncing ? (
+                <table className="data-table">
+                  <tbody>
+                    {[0, 1, 2].map(i => (
+                      <tr className="skeleton-row" key={i}>
+                        <td><div className="skeleton-bar" style={{ width: '60%' }} /></td>
+                        <td><div className="skeleton-bar" style={{ width: '70%' }} /></td>
+                        <td><div className="skeleton-bar" style={{ width: '40%' }} /></td>
+                        <td><div className="skeleton-bar" style={{ width: '30%', marginLeft: 'auto' }} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : activeUsers.length === 0 ? (
+                <div className="table-empty">
+                  <IconUsers size={30} />
+                  {allActiveUsers.length === 0 ? (
+                    <>
+                      <p className="eyebrow">No users yet</p>
+                      <p>Active accounts will appear here once someone registers.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="eyebrow">No matches</p>
+                      <p>Nothing found for "{searchTerm}". Try a different name or email.</p>
+                    </>
+                  )}
+                </div>
+              ) : (
                 <table className="data-table">
                   <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Status</th>
-                      <th>Role</th>
-                      <th className="text-right">Admin Actions</th>
-                    </tr>
+                    <tr><th>User</th><th>Email Address</th><th>Role</th><th className="text-right">Actions</th></tr>
                   </thead>
                   <tbody>
                     {activeUsers.map(user => (
@@ -387,81 +396,77 @@ function App() {
                         <td>
                           <div className="table-user-cell">
                             <div className="avatar-small">{user.name.charAt(0)}</div>
-                            <div className="user-info-stack">
-                              <span className="fw-600">{user.name}</span>
-                              <span className="text-muted" style={{fontSize: '12px'}}>{user.email}</span>
-                            </div>
+                            <span className="fw-600">{user.name}</span>
                           </div>
                         </td>
+                        <td className="text-muted">{user.email}</td>
                         <td>
-                          {user.currentSessionId ? (
-                             <span className="status-badge online">● Online</span>
-                          ) : (
-                             <span className="status-badge offline">○ Offline</span>
-                          )}
-                        </td>
-                        <td>
-                          <select className={`role-select ${user.userType === 'admin' ? 'role-admin' : 'role-user'}`} value={user.userType} onChange={(e) => handleRoleChange(user, e.target.value)} disabled={user.id === loggedInUser.id}>
+                          <select className={`role-select ${user.userType === 'admin' ? 'role-admin' : 'role-user'}`}
+                            value={user.userType} onChange={(e) => handleRoleChange(user, e.target.value)}>
                             <option value="user">Standard</option>
                             <option value="admin">Admin</option>
                           </select>
                         </td>
-                        <td className="text-right actions-cell">
-                          <button 
-                            className="btn-text warning" 
-                            onClick={() => handleForceLogout(user)}
-                            disabled={!user.currentSessionId || user.id === loggedInUser.id}
-                            title={!user.currentSessionId ? "User is offline" : "Kick this user"}
-                          >
-                            Force Logout
-                          </button>
-                          
-                          <button 
-                            className="btn-text danger" 
-                            onClick={() => handleDelete(user.id)}
-                            disabled={user.id === loggedInUser.id}
-                          >
-                            Delete
+                        <td className="text-right">
+                          <button className="btn-icon danger" onClick={() => requestDelete(user)}>
+                            <IconTrash size={13} /> Delete
                           </button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
+              )}
             </div>
           </div>
         ) : (
+          /* STANDARD USER VIEW */
           <div className="user-view">
-             <div className="profile-card">
-                <div className="profile-header">
-                  <div className="avatar-large">{loggedInUser.name.charAt(0)}</div>
-                  <div>
-                    <h2>{loggedInUser.name}</h2>
-                    <span className="badge badge-user">Standard User</span>
-                  </div>
+            <div className="profile-card">
+              <div className="profile-header">
+                <div className="avatar-large">{loggedInUser.name.charAt(0)}</div>
+                <div className="profile-header-info">
+                  <h3>{loggedInUser.name}</h3>
+                  <span className="badge badge-user">Standard User</span>
                 </div>
-                <div className="profile-body">
-                  <div className="info-group">
-                    <label>Email Address</label>
-                    <p>{loggedInUser.email}</p>
-                  </div>
-                  <div className="info-group">
-                    <label>Account Status</label>
-                    <p style={{ color: 'var(--success)', fontWeight: 'bold' }}>Active & Verified</p>
-                  </div>
-                  <div className="info-group" style={{ background: 'var(--bg-main)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)'}}>
-                    <label>Session Information</label>
-                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                      Your session is secure and will automatically log out in <strong>{formatTime(timeLeft)}</strong>. 
-                      Logging in from another device will automatically terminate this session.
-                    </p>
-                  </div>
+              </div>
+              <div className="profile-body">
+                <div className="info-group">
+                  <label>Email Address</label>
+                  <p>{loggedInUser.email}</p>
                 </div>
-             </div>
+                <div className="info-group">
+                  <label>Account Status</label>
+                  <p>Active</p>
+                </div>
+                <div className="info-group">
+                  <label>Access Level</label>
+                  <p>Standard — read/write on your own account only</p>
+                </div>
+                <div className="profile-note">
+                  Need administrator access? Register a new account and select
+                  "Administrator" as the account type. Requests are reviewed and
+                  approved by an existing admin before access is granted.
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
+
+      {/* CONFIRM DIALOG */}
+      {confirmDialog && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setConfirmDialog(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3>{confirmDialog.title}</h3>
+            <p>{confirmDialog.message}</p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setConfirmDialog(null)}>Cancel</button>
+              <button className="btn-danger-solid" onClick={confirmDialog.onConfirm}>{confirmDialog.confirmLabel}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
