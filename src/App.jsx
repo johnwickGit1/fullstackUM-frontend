@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const API_BASE_URL = 'https://fullstackum-backend.onrender.com/users';
+const SESSION_DURATION = 15 * 60; // 15 minutes, in seconds
+const FORCE_LOGOUT_POLL_MS = 20000; // how often a signed-in standard user checks for a forced sign-out
 
 /* ================= ICONS =================
    Small inline SVGs so the app has zero icon-library dependency. */
@@ -20,6 +22,7 @@ const IconLogout = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 
 const IconTrash = (p) => <Icon {...p}><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></Icon>;
 const IconUsers = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Icon>;
 const IconShield = (p) => <Icon {...p}><path d="M12 2 4 5v6c0 5 3.4 8.9 8 11 4.6-2.1 8-6 8-11V5l-8-3Z" /></Icon>;
+const IconPower = (p) => <Icon {...p}><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><path d="M12 2v10" /></Icon>;
 
 function App() {
   const [currentView, setCurrentView] = useState('login');
@@ -30,6 +33,8 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(SESSION_DURATION);
+  const warnedRef = useRef(false);
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', userType: 'user' });
@@ -38,6 +43,80 @@ function App() {
     setMessage({ text, isError });
     setTimeout(() => setMessage({ text: '', isError: false }), 5000);
   };
+
+  // ---- 15-minute session timer -------------------------------------
+  // Resets on login and on any user activity; auto-logs-out at zero.
+  useEffect(() => {
+    if (!loggedInUser) return;
+    setTimeLeft(SESSION_DURATION);
+    warnedRef.current = false;
+
+    const tick = setInterval(() => {
+      setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [loggedInUser?.id]);
+
+  useEffect(() => {
+    if (!loggedInUser) return;
+    let lastReset = Date.now();
+    const resetTimer = () => {
+      const now = Date.now();
+      if (now - lastReset > 5000) { // throttle so every mouse tick doesn't trigger a re-render
+        lastReset = now;
+        setTimeLeft(SESSION_DURATION);
+        warnedRef.current = false;
+      }
+    };
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => window.addEventListener(evt, resetTimer));
+    return () => events.forEach(evt => window.removeEventListener(evt, resetTimer));
+  }, [loggedInUser?.id]);
+
+  useEffect(() => {
+    if (!loggedInUser) return;
+    if (timeLeft === 0) {
+      showMessage('Session expired after 15 minutes of inactivity. Please sign in again.', true);
+      handleLogout();
+    } else if (timeLeft === 60 && !warnedRef.current) {
+      warnedRef.current = true;
+      showMessage('Heads up — your session ends in 1 minute.', true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
+  // ---- Admin force-logout polling (standard users only) -------------
+  // Assumes the backend user record exposes a `forceLogout` boolean and
+  // supports GET /users/:id. Adjust the endpoint if your API differs.
+  useEffect(() => {
+    if (!loggedInUser || loggedInUser.userType === 'admin') return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/${loggedInUser.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.forceLogout) {
+          showMessage('You were signed out by an administrator.', true);
+          fetch(`${API_BASE_URL}/${loggedInUser.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...data, forceLogout: false })
+          }).catch(() => {});
+          handleLogout();
+        }
+      } catch (error) {
+        // Silent on transient network errors — don't spam the toast every 20s.
+      }
+    }, FORCE_LOGOUT_POLL_MS);
+    return () => clearInterval(poll);
+  }, [loggedInUser?.id, loggedInUser?.userType]);
+
+  const formatTime = (secs) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+  const timerState = timeLeft <= 60 ? 'critical' : timeLeft <= 300 ? 'warning' : 'normal';
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -166,6 +245,32 @@ function App() {
     });
   };
 
+  const performForceLogout = async (user) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/${user.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...user, forceLogout: true })
+      });
+      if (response.ok) {
+        showMessage(`${user.name} has been signed out.`);
+      }
+    } catch (error) {
+      showMessage('Error forcing logout.', true);
+    } finally {
+      setConfirmDialog(null);
+    }
+  };
+
+  const requestForceLogout = (user) => {
+    setConfirmDialog({
+      title: 'Force logout',
+      message: `${user.name} will be immediately signed out of their active session.`,
+      confirmLabel: 'Force logout',
+      onConfirm: () => performForceLogout(user)
+    });
+  };
+
   const handleLogout = () => {
     setLoggedInUser(null);
     setLoginForm({ email: '', password: '' });
@@ -272,6 +377,10 @@ function App() {
           </div>
         </div>
         <div className="sidebar-footer">
+          <div className={`session-timer ${timerState}`} title="Time remaining before automatic sign-out">
+            <span className="eyebrow">Session</span>
+            <span className="session-timer__value">{formatTime(timeLeft)}</span>
+          </div>
           <div className="user-badge">
             <div className="avatar">{loggedInUser.name.charAt(0)}</div>
             <div className="user-info">
@@ -315,7 +424,7 @@ function App() {
                         <td><span className="tag tag-pending">Pending Admin</span></td>
                         <td className="text-right">
                           <div className="row-actions">
-                            <button className="btn-danger-solid" onClick={() => handleApprove(user)}>
+                            <button className="btn-success-solid" onClick={() => handleApprove(user)}>
                               <IconCheck size={14} /> Approve
                             </button>
                             <button className="btn-icon danger" onClick={() => requestReject(user)}>
@@ -408,9 +517,16 @@ function App() {
                           </select>
                         </td>
                         <td className="text-right">
-                          <button className="btn-icon danger" onClick={() => requestDelete(user)}>
-                            <IconTrash size={13} /> Delete
-                          </button>
+                          <div className="row-actions">
+                            {user.userType === 'user' && (
+                              <button className="btn-icon warn" onClick={() => requestForceLogout(user)}>
+                                <IconPower size={13} /> Force Logout
+                              </button>
+                            )}
+                            <button className="btn-icon danger" onClick={() => requestDelete(user)}>
+                              <IconTrash size={13} /> Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -437,7 +553,7 @@ function App() {
                 </div>
                 <div className="info-group">
                   <label>Account Status</label>
-                  <p>Active</p>
+                  <p><span className="status-dot" />Active</p>
                 </div>
                 <div className="info-group">
                   <label>Access Level</label>
